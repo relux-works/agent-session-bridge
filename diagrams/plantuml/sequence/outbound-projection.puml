@@ -1,0 +1,129 @@
+@startuml outbound-projection
+!include ../_includes/theme.puml
+
+title Outbound projection with the guard and receipts
+
+participant "Event journal\n(session host)" as J $COMMITTED
+participant "Projections + DLP" as PROJ $SERVICE
+participant "Outbound guard\n(optional, pinned model)" as GUARD $SERVICE
+participant "Output consumer\n(app push, example)" as CONS $SERVICE
+actor "Operator device" as DEV $PERSON
+database "Audit hash chain" as AUD $COMMITTED
+
+J -> PROJ : events at the audience-bound cursor
+
+== Project and filter ==
+PROJ -> PROJ : recheck audience and grants;\nrun deterministic DLP checks
+alt audience revoked or no grant
+  PROJ -> AUD : delivery_refused (no proposal exists;\nnothing flows further)
+else audience admitted
+  note right of PROJ
+    Redaction creates a separately signed
+    derivative referencing the source digests.
+    Secret filters are best effort, never a
+    substitute for audience authorization.
+  end note
+  PROJ -> AUD : proposal (digest, audience, policy)
+  == Guard verdict ==
+  alt guard disabled by declared configuration
+    PROJ -> PROJ : proceed without a verdict\n(guardless configuration is explicit)
+    == Deliver (guardless path) ==
+    PROJ -> CONS : allowed proposal (exactly the checked bytes)
+    CONS -> CONS : encrypt and sign\nfor the carrier
+    CONS -> DEV : push wakes; app pulls state\nover an authenticated channel
+    CONS -> AUD : transport evidence: enqueued / wake accepted\n(not an endpoint receipt)
+    alt app fetches
+      DEV -> CONS : fetch + endpoint-signed receipt\n(digest, recipient, status)
+      CONS -> AUD : endpoint receipt (verified by the sender)
+    else never fetched
+      note right of CONS
+        Transport evidence only: a wake the app
+        never fetched is never reported as an
+        endpoint receipt. Forged or mismatched
+        receipts are rejected; a crash between
+        send and receipt persistence reports
+        unknown until evidence exists.
+      end note
+    end
+  else guard enabled
+    PROJ -> GUARD : verdict request (DLP-filtered immutable\nproposal content + classification context;\ndigest as the integrity binding)
+    note right of GUARD
+      The guard classifies content, not a bare
+      digest — or a tightly scoped immutable
+      reference whose resolution boundary is
+      part of the approved design. The classifier
+      endpoint is authorized as a data recipient
+      before it sees private content.
+    end note
+    alt allow
+      GUARD --> PROJ : allow
+      == Deliver (allow path) ==
+      PROJ -> CONS : allowed proposal (exactly the checked bytes)
+      CONS -> CONS : encrypt and sign\nfor the carrier
+      CONS -> DEV : push wakes; app pulls state\nover an authenticated channel
+      CONS -> AUD : transport evidence: enqueued / wake accepted\n(not an endpoint receipt)
+      alt app fetches
+        DEV -> CONS : fetch + endpoint-signed receipt\n(digest, recipient, status)
+        CONS -> AUD : endpoint receipt (verified by the sender)
+      else never fetched
+        note right of CONS
+          Transport evidence only: a wake the app
+          never fetched is never reported as an
+          endpoint receipt. Forged or mismatched
+          receipts are rejected; a crash between
+          send and receipt persistence reports
+          unknown until evidence exists.
+        end note
+      end
+    else deny
+      GUARD --> PROJ : deny
+      PROJ -> AUD : guard_deny (no delivery follows)
+    else review
+      GUARD --> PROJ : review (pending, not delivered)
+      PROJ -> DEV : release request (outside the agent's reach)
+      DEV -> PROJ : exact-digest release or refusal
+      alt released
+        PROJ -> AUD : release (content, audience,\ndirection, policy)
+        note right of PROJ
+          Changing any of content, audience,
+          direction or policy after review
+          voids the release: renewed checks
+          on the new identity are required.
+        end note
+        == Deliver (release path) ==
+        PROJ -> CONS : allowed proposal (exactly the checked bytes)
+        CONS -> CONS : encrypt and sign\nfor the carrier
+        CONS -> DEV : push wakes; app pulls state\nover an authenticated channel
+        CONS -> AUD : transport evidence: enqueued / wake accepted\n(not an endpoint receipt)
+        alt app fetches
+          DEV -> CONS : fetch + endpoint-signed receipt\n(digest, recipient, status)
+          CONS -> AUD : endpoint receipt (verified by the sender)
+        else never fetched
+          note right of CONS
+            Transport evidence only: a wake the app
+            never fetched is never reported as an
+            endpoint receipt. Forged or mismatched
+            receipts are rejected; a crash between
+            send and receipt persistence reports
+            unknown until evidence exists.
+          end note
+        end
+      else refused
+        PROJ -> AUD : release_refused (no delivery follows)
+      end
+    else guard failure
+      GUARD --> PROJ : timeout / provider error /\nmodel mismatch / malformed output
+      PROJ -> AUD : guard_failure (fail-closed;\nno delivery follows)
+    end
+  end
+end
+note right of CONS
+  Cursors and exports stay bound to
+  audience and policy, rechecked at
+  delivery. Revoked subscriptions close;
+  delivered plaintext cannot be recalled.
+  A summary cannot issue an approval.
+end note
+
+caption Sources: docs/architecture.md §5, §8, §12; docs/threat-model.md (mitigations, out of scope)
+@enduml

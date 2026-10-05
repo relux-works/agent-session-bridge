@@ -1,0 +1,110 @@
+@startuml bridge-components
+!pragma layout smetana
+!include ../_includes/theme.puml
+
+title Session bridge: producers and consumers meet the session host through the trust gate
+
+actor "Operator" as OP $PERSON
+actor "Peer agent / human" as PEER $PERSON
+actor "Session model" as MODEL $AGENT
+
+together {
+  component "Matrix" as M $CARRIER
+  component "XMPP" as X $CARRIER
+  component "App" as APP $CARRIER
+  component "Telegram" as TG $CARRIER
+}
+
+component "Local API +\nmodel mailbox" as LOCAL $SERVICE
+component "Board / keeper\nadapter" as BOARD $SERVICE
+
+package "agent-session-bridge" {
+  component "Input producers" as PROD $SERVICE
+  component "Ingress trust gate" as GATE $SERVICE
+  component "Shared verifier\n(MCP + CLI)" as VER $SERVICE
+  component "Projections + DLP" as PROJ $SERVICE
+  component "Outbound guard\n(optional)" as OG $SERVICE
+  component "Output consumers" as CONS $SERVICE
+  database "Audit hash chain" as AUD $COMMITTED
+  database "Replay bindings" as REP $PRIVATE
+  file "Bridge profile\n(curator run)" as PROF $PRIVATE
+  file "Pinned identities +\ntrust snapshot" as PINS $PRIVATE
+}
+
+package "agent-session-host" {
+  component "Durable command queue" as Q $SERVICE
+  component "Session supervisor" as SUP $SERVICE
+  database "Event journal" as J $COMMITTED
+}
+
+OP --> M : signed envelopes
+OP --> X : signed envelopes
+OP --> APP : approvals, pulls
+PEER --> M : peer envelopes
+PEER --> X : peer envelopes
+
+M --> PROD : envelopes
+X --> PROD : envelopes
+APP --> PROD : envelopes
+TG --> PROD : envelopes
+
+PROD --> GATE : immutable original envelopes\n(raw bytes retained)
+LOCAL --> GATE : local envelopes\n(same gate, no side door)
+BOARD --> GATE : typed directives\n(same gate, no side door)
+PROF --> GATE : session → channel binding:\nclasses, grants, audience
+PINS --> GATE : pins, epochs, revocation
+GATE --> REP : id → envelope-hash bindings
+GATE --> AUD : admissions, rejections
+GATE --> Q : admitted commands
+Q --> SUP : dispatch (reauthorized)
+SUP --> J : normalized events
+
+GATE --> VER : verification evidence
+VER --> PINS : fresh pin / revocation lookups
+VER --> REP : fresh replay lookups
+MODEL --> VER : verify_envelope\n(caller-bound, authorized reads;\nevidence out, never\nthe unverified body)
+
+J --> PROJ : events at cursor
+PROF --> PROJ : audience, retention
+PROJ --> OG : DLP-filtered proposal\ncontent + context
+OG --> CONS : allowed proposals
+PROJ --> CONS : allowed proposals\n(guard disabled)
+PROJ --> AUD : proposals, redactions
+OG --> AUD : verdicts, releases
+CONS --> AUD : transport + endpoint receipts
+CONS --> M : addressed projections
+CONS --> X : addressed projections
+CONS --> APP : push wakes,\napp pulls state
+CONS --> TG : addressed projections
+
+note right of PROD
+  Producers never hold a terminal
+  or a native harness endpoint.
+  Carrier login never equals
+  application identity. Carrier arrows
+  show enabled-binding capabilities
+  only: direction (direct input,
+  doorbell/pull, output only) is
+  per-binding configuration.
+end note
+
+note right of GATE
+  All managed inputs cross this gate:
+  carriers, local APIs, the model
+  mailbox, board and keeper. Unsigned
+  arrivals go to an operator quarantine
+  view; their body never enters the
+  gate or the guard model.
+end note
+
+note right of OG
+  No tools, no session credentials,
+  no signing authority, no side effects.
+  The classifier endpoint is authorized
+  as a data recipient before it sees
+  private content. Disabled only by
+  declared configuration.
+end note
+
+caption Sources: docs/architecture.md §1–§3, §5–§8
+@enduml
