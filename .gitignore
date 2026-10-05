@@ -1,0 +1,4 @@
+# Board state never lives in this repository.
+.task-board/
+# Local scratch
+.temp/
