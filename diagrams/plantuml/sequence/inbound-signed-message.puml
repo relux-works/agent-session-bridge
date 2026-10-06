@@ -1,0 +1,147 @@
+@startuml inbound-signed-message
+!include ../_includes/theme.puml
+
+title Inbound signed message through the ingress trust gate, with refusal paths
+
+actor "Operator" as OP $PERSON
+participant "Matrix producer\n(example carrier)" as PROD $CARRIER
+participant "Ingress trust gate" as GATE $SERVICE
+participant "Trust store\n(pins, grants, revocation)" as TRUST $PRIVATE
+database "Replay bindings" as REP $PRIVATE
+participant "Guard\n(optional, pinned model)" as GUARD $SERVICE
+participant "Command queue" as Q $SERVICE
+database "Audit hash chain" as AUD $COMMITTED
+
+OP -> PROD : signed envelope
+PROD -> GATE : submit the immutable original envelope\n(raw bytes retained)
+
+== 0. Admission budgets ==
+GATE -> GATE : apply global and per-principal budgets\nbefore expensive verification
+alt saturated
+  GATE -> AUD : rejection: saturated
+  GATE --> PROD : reject (backpressure;\nnever a bypass)
+else budget admitted
+  == 1. Envelope verify ==
+  GATE -> GATE : bound size and version;\nfreeze exact bytes; verify signature
+  alt malformed or bad signature
+    GATE -> AUD : rejection: envelope_invalid
+    GATE --> PROD : reject
+  else envelope valid
+    == 2. Pinned identity ==
+    GATE -> TRUST : resolve signer, key epoch, revocation
+    alt unknown pin or revoked key
+      GATE -> AUD : rejection: identity_unknown / revoked
+      GATE --> PROD : reject (key changes go to operator review)
+    else identity established
+      == 3. Grant / mandate scope ==
+      GATE -> TRUST : intersect action / resource / audience\nwith policy, binding, ancestry, capability
+      alt out of scope
+        GATE -> AUD : rejection: grant_denied
+        GATE --> PROD : reject (room access is not session.input)
+      else in scope
+        == 4. Freshness / replay ==
+        GATE -> REP : look up (trust-domain, signer, message-id)
+        alt stale
+          GATE -> AUD : rejection: stale
+          GATE --> PROD : reject
+        else same id with different bytes
+          GATE -> AUD : rejection: replay_conflict
+          GATE --> PROD : reject (conflict recorded durably)
+        else completed same-hash duplicate
+          REP --> GATE : stored outcome
+          GATE -> AUD : duplicate_completed (cached evidence)
+          GATE --> PROD : stored outcome (no re-admission,\nno model call, no queue write)
+        else in-flight / pending / outcome-unknown duplicate
+          GATE -> REP : reconcile with the existing claim
+          GATE --> PROD : pending outcome or reconciled state\n(no new admission)
+        else new claim
+          GATE -> REP : reserve the binding (pre-guard reservation;\nnot acceptance)
+          == 5. Ordering (ordered classes) ==
+          GATE -> GATE : acquire the per-sender sequence\nfor the ordered class
+          alt gap or conflict
+            GATE -> AUD : parked: order_gap (explicit gap policy)
+            GATE --> PROD : parked (never silently reordered)
+          else order satisfied
+            == 6. Deterministic checks ==
+            GATE -> GATE : verify routing, decrypt,\ncheck UTF-8, size, type, DLP
+            alt deterministic deny
+              GATE -> AUD : rejection: content_denied
+              GATE --> PROD : reject (never reaches any model;\ncannot be approved)
+            else deterministic pass
+              == 7. Optional guard verdict ==
+              alt guard disabled by declared configuration
+                GATE -> GATE : proceed without a verdict\n(guardless configuration is explicit)
+                == 8. Frame and commit (guardless path) ==
+                GATE -> GATE : bridge-local atomic commit\n(admission event + verification evidence\n+ replay completion + enqueue intent)\nowner: ingress trust gate
+                GATE -> AUD : admission event + verification evidence
+                GATE -> REP : complete the pre-guard reservation
+                GATE -> Q : admitted command, framed\nwith its provenance\n(idempotent key: trust-domain, signer,\nmessage-id, envelope hash)
+                Q --> GATE : durable enqueue ack\n(host deduplicates by the key)
+                GATE --> PROD : receipt: accepted\n(only after the ack)
+              else guard enabled
+                GATE -> GUARD : verdict request (classifier endpoint\nauthorized as a data recipient first)
+                alt allow
+                  GUARD --> GATE : allow (bound to the digest)
+                  == 8. Frame and commit (allow path) ==
+                  GATE -> GATE : bridge-local atomic commit\n(admission event + verification evidence\n+ replay completion + enqueue intent)\nowner: ingress trust gate
+                  GATE -> AUD : admission event + verification evidence
+                  GATE -> REP : complete the pre-guard reservation
+                  GATE -> Q : admitted command, framed\nwith its provenance\n(idempotent key: trust-domain, signer,\nmessage-id, envelope hash)
+                  Q --> GATE : durable enqueue ack\n(host deduplicates by the key)
+                  GATE --> PROD : receipt: accepted\n(only after the ack)
+                else deny
+                  GUARD --> GATE : deny
+                  GATE -> AUD : rejection: guard_deny
+                  GATE --> PROD : reject (no commit, queue write\nor acceptance follows)
+                else review
+                  GUARD --> GATE : review (pending, not accepted)
+                  GATE -> GATE : wait for a separately authorized\nexact-digest release
+                  alt valid release
+                    GATE -> GATE : release verified (digest, granter, policy)
+                    == 8. Frame and commit (release path) ==
+                    GATE -> GATE : bridge-local atomic commit\n(admission event + verification evidence\n+ replay completion + enqueue intent)\nowner: ingress trust gate
+                    GATE -> AUD : admission event + verification evidence
+                    GATE -> REP : complete the pre-guard reservation
+                    GATE -> Q : admitted command, framed\nwith its provenance\n(idempotent key: trust-domain, signer,\nmessage-id, envelope hash)
+                    Q --> GATE : durable enqueue ack\n(host deduplicates by the key)
+                    GATE --> PROD : receipt: accepted\n(only after the ack)
+                  else release refused or expired
+                    GATE -> AUD : rejection: release_refused
+                    GATE --> PROD : reject (still unaccepted)
+                  end
+                else guard failure
+                  GUARD --> GATE : timeout / provider error /\nmodel mismatch / malformed output
+                  GATE -> AUD : rejection: guard_failure
+                  GATE --> PROD : reject (fail-closed;\nnever a bypass)
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+end
+note right of Q
+  All three commit leaves share one contract:
+  the gate owns a bridge-local atomic write,
+  then an idempotent host enqueue. A crash
+  between bridge commit and host ack replays
+  from durable bridge state; the host
+  deduplicates by the same key. Before dispatch,
+  the host rechecks revocation, expiry,
+  generation, the live turn and the interaction
+  revision. Only the enrolled owner's authorized
+  instruction has user authority; critical acts
+  need presence bound to the act digest.
+end note
+
+== Unsigned arrivals (separate path) ==
+PROD -> PROD : unsigned arrival →\noperator quarantine view
+note right of PROD
+  The body never enters the gate,
+  the session, or the guard model.
+end note
+
+caption Sources: docs/architecture.md §3, §3.2–§3.5, §8, §12; docs/threat-model.md (entry points, mitigations)
+@enduml

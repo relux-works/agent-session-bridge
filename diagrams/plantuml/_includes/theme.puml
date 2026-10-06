@@ -1,0 +1,32 @@
+' Shared look for the diagrams of this repository (same palette as agent-session-host).
+' Included by every diagram under diagrams/plantuml/ (no @startuml: never rendered alone).
+!theme plain
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 8
+skinparam defaultFontSize 13
+skinparam titleFontSize 18
+skinparam captionFontSize 11
+skinparam captionFontColor #555555
+skinparam wrapWidth 400
+skinparam maxMessageSize 900
+skinparam ArrowColor #37474F
+skinparam ArrowFontColor #263238
+skinparam ArrowFontSize 11
+skinparam NoteBackgroundColor #FFFDE7
+skinparam NoteBorderColor #B8A94A
+
+' Colour says what a thing is; the same kinds share a colour in every diagram.
+!$SERVICE = "#E3F2FD"
+!$SERVICE_LINE = "#1E5AA8"
+!$AGENT = "#F3E5F5"
+!$AGENT_LINE = "#6A1B9A"
+!$COMMITTED = "#FFF8E1"
+!$COMMITTED_LINE = "#A66B00"
+!$PRIVATE = "#ECEFF1"
+!$PRIVATE_LINE = "#455A64"
+!$PERSON = "#E8F5E9"
+!$PERSON_LINE = "#2E7D32"
+!$CARRIER = "#E0F2F1"
+!$CARRIER_LINE = "#00695C"
