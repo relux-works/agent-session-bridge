@@ -2,6 +2,14 @@
 
 Status: **architecture review**. This is a short threat model of the bridge as designed in [architecture.md](architecture.md) — proposed mitigations, not shipped controls. It covers the bridge boundary only: producers, consumers, the trust gate, the verifier, keys and audit. The asset statements below hold within that boundary; they are not guarantees about native inputs or egress outside it.
 
+## Security goals
+
+Three design requirements; each applies through the accepted mode boundaries in [architecture.md](architecture.md) §4–§4.1, not as universal mediation. The mitigations below exist to keep them:
+
+- **Cryptography and verification of session input.** Every managed input into a session is cryptographically verified before it can act: in mode T all managed bridge input crosses the gate; in mode S every model input is mediated or refused. Native and vendor paths outside the declared mode stay outside the guarantee. Answers: forged or unauthorized input, replay and reorder, instruction injection inside allowed content, compromised-key signing.
+- **No process can simply write into a session: a state report is an observation channel, never a command path into the session.** Managed writes cross the gate; agent state reports update display state and reported-status waits for one execution and never enter the gate as commands. A compatibility (mode T + RC) session may still receive vendor-origin RC input outside per-message assurance (§4.1); a strict session without evidenced RC exclusion is refused or parked. Answers: local-attacker writes, vendor side channels, malicious-app input, verifier and receipt misuse.
+- **Scale to large swarms.** Admission, queues, and audit stay bounded under flood and fleet growth. Answers: resource exhaustion and bot loops, carrier duplication storms.
+
 ## Assets
 
 - **Session integrity.** Only admitted commands reach the model as instructions; everything else arrives as attributed data or not at all.
@@ -35,6 +43,7 @@ Status: **architecture review**. This is a short threat model of the bridge as d
 | Guard execution boundary (when enabled) | Fixed-instruction, tool-less, bounded classifier calls; verdicts; exact-digest release approvals |
 | Audit store and replay bindings | Durable state the gate depends on |
 | Emergency-control route | Independently authorized stop/fence actions only — admits nothing |
+| Agent state-report channel (vendor reports) | Execution-local telemetry → display state and reported-status waits only; observation-only, with no path to dispatch, authority, or grants |
 
 ## Mitigations (by threat)
 
@@ -57,6 +66,7 @@ Status: **architecture review**. This is a short threat model of the bridge as d
 - **Receipt forgery or overstatement.** One issuer per stage — local acceptance, transport enqueue/wake, endpoint receipt/fetch, host dispatch/application evidence, rejection, unknown; signatures bind digest, recipient, status, policy and audit reference; only evidenced stages reported; push acceptance never implies data fetch; forged/mismatched receipts rejected; crash-to-receipt gap reports `unknown` (§8).
 - **Local resource exhaustion and bot loops.** Early global/per-principal admission budgets before expensive work; bounded parser work, quarantine, replay state, reviews, subscriptions, outbox/blob storage and classifier concurrency/spend; backpressure with recorded refusals; replay safety preserved during reclaim; explicit evidence accounting when auditing fails; a bounded, independently authorized emergency-control route that admits nothing (§3 step 0, §3.5).
 - **Vendor side channels.** Claude Remote Control is classified as an operator compatibility channel outside per-message assurance; strict sessions refuse every activation path (initial flags, in-session enablement, reconnect/resume, attachments, permission races) or park; compatibility outcomes and vendor/unknown provenance are explicit per path (§4.1).
+- **Vendor state reports.** Classified observation-only: they update display state and reported-status waits for one execution and never enter the gate as commands; no report path reaches dispatch, authority, or grants.
 
 ## Out of scope
 

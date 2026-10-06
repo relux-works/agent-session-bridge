@@ -12,6 +12,8 @@ The bridge is the single seam where agent sessions meet the outside world. It ow
 - **Outbound.** Take journaled session events from the host and distribute authorized views through output consumers: state, pending decisions, summaries, artifacts, or the raw stream for debugging. Each consumer holds a separate read scope; a summary can never issue an approval, prove completion, or broaden its audience.
 - **The gate.** No managed input reaches a model except through the ingress trust gate — including local API calls and model mailbox reads. Board and keeper directives enter through the same gate, not through a side door.
 
+Agent state reports are observation-only: vendor telemetry about one execution (for example herdr-style state reports) updates display state and reported-status waits, and never passes the ingress gate as commands.
+
 What the bridge does not own: session supervision and execution custody (agent-session-host); signatures, identity, grants and mandates (curator-trust plus the mandates model — the bridge applies them, it does not define them); workflow truth such as goals and ledgers (task-board behind its adapter); native harness behavior (harness adapters in the host).
 
 ## 2. Provider plugin model
@@ -246,16 +248,16 @@ Public-safe wording: behaviors are described in our own terms; no source text is
 | XMPP first product carrier, Matrix doorbell bindings | Same discussions; the session-platform draft | agent-session-bridge | Adopted: one envelope API; carrier login never equals application identity. |
 | Agent keys with signed introductions | Same discussions | curator-trust / mandates | Adapted: separately generated pilot keys plus introductions; protocol-level derivation stays research. |
 | `curator run` bridge profile: session→channel mapping | Same discussions; the session-platform draft | curator run | Adopted: binds reference, endpoint, channel, classes, mode, grants, audience, budgets. |
-| Two native surfaces with declared launch mode | [HAPI at the inspected commit](https://github.com/tiann/hapi/tree/5153ff23c196c7b84818752f7a631420ef0eb25b) (AGPL-3.0; behavior studied, no code reused pending a licence decision) | agent-session-host | Adopted: preserving a native terminal and structured control are different contracts. |
+| Two native surfaces with declared launch mode | [HAPI at the inspected commit](https://github.com/tiann/hapi/tree/5153ff23c196c7b84818752f7a631420ef0eb25b) (AGPL-3.0; behavior studied, no code reused; the pending-reuse status is historical — inspiration only) | agent-session-host | Adopted: preserving a native terminal and structured control are different contracts. |
 | Permission request → phone decision → native response | HAPI, as above | agent-session-host, agent-session-bridge | Adopted: typed approval round trip; discovery never grants write authority. |
 | Reconnecting typed event contract; push wakes, app pulls state | HAPI, as above | agent-session-bridge | Adopted: shared event schema; push-token possession is not authentication. |
-| Durable agent identity with tenant/audience binding | [Buzz at the inspected commit](https://github.com/block/buzz/tree/f0eb5575ffc9d5f57af4ed3f574529d997c83a0d) (Apache-2.0; selective reuse candidate with notices) | curator-trust / mandates, agent-session-host | Adapted: stable participant across replacement; the local journal stays authoritative. |
+| Durable agent identity with tenant/audience binding | [Buzz at the inspected commit](https://github.com/block/buzz/tree/f0eb5575ffc9d5f57af4ed3f574529d997c83a0d) (Apache-2.0; behavior studied with notices; the reuse-candidate status is historical — inspiration only) | curator-trust / mandates, agent-session-host | Adapted: stable participant across replacement; the local journal stays authoritative. |
 | Agent-side author admission as a typed admitted event | Buzz, as above | agent-session-bridge | Adapted: coarse author-policy precedent; not a grant or presence system. |
 | Verify-before-decrypt, immutable snapshots, ID/hash binding, signed receipts | Reef ([design](https://reefwire.ai/docs/design/), [security](https://reefwire.ai/docs/security/); MIT protocol/relay) | agent-session-bridge, agent-session-host | Adopted: endpoint discipline for messages and projections. |
 | Pinned-model guard contract, fail-closed, exact-digest review | Reef ([guards](https://reefwire.ai/docs/guards/)), as above | agent-session-bridge | Adapted: same contract shape, optional rather than Reef-mandatory. |
 | Single semantic write gate: accepted/dispatched/applied/unknown | The session-platform draft | agent-session-host | Adopted: retried delivery never blindly retries a native prompt. |
 | Relay as readable source of truth | Buzz, as above | agent-session-bridge | Rejected: conflicts with E2E; the relay stays ciphertext-only where E2E is promised. |
-| Ready-made code transplantation | HAPI, as above | agent-session-host | Rejected for now: licence decision pending; behavior study only. |
+| Ready-made code transplantation | HAPI, as above | agent-session-host | Rejected: inspiration only, no code transplantation. (The licence-pending status is historical.) |
 
 ## 11. Open questions
 
